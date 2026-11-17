@@ -1,4 +1,5 @@
 #include <array>
+#include <atomic>
 
 #include "librecomp/helpers.hpp"
 #include "recomp_input.h"
@@ -18,6 +19,13 @@ static const std::array n64_button_values = {
     DEFINE_N64_BUTTON_INPUTS()
 };
 #undef DEFINE_INPUT
+
+// Set by the patches (modern_pad) while a menu or dialogue reads the pad: there the stick must stay a stick.
+static std::atomic_bool pad_menu = false;
+
+extern "C" void recomp_set_pad_menu(uint8_t* rdram, recomp_context* ctx) {
+    pad_menu.store(_arg<0, int32_t>(rdram, ctx) != 0);
+}
 
 // Make the input name array.
 #define DEFINE_INPUT(name, value, readable) readable,
@@ -125,8 +133,10 @@ bool recomp::get_n64_input(int controller_num, uint16_t* buttons_out, float* x_o
         // FPS style movement: sideways input strafes with the game's own L/R strafe instead of turning, since the
         // mouse already turns Mega Man.
         if (zelda64::get_mouse_camera_mode() == zelda64::MouseCameraMode::FirstPerson &&
-            zelda64::get_first_person_strafe_mode() == zelda64::FirstPersonStrafeMode::On) {
+            zelda64::get_first_person_strafe_mode() == zelda64::FirstPersonStrafeMode::On && !pad_menu.load()) {
             constexpr float strafe_threshold = 0.5f;
+            // L here only means the stick's strafe left: L1 (strafe modifier in third person) does nothing here.
+            cur_buttons &= ~n64_button_values[(size_t)GameInput::L - (size_t)GameInput::N64_BUTTON_START];
             if (cur_x <= -strafe_threshold) {
                 cur_buttons |= n64_button_values[(size_t)GameInput::L - (size_t)GameInput::N64_BUTTON_START];
             }

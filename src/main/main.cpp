@@ -588,7 +588,12 @@ int main(int argc, char** argv) {
     // Process arguments.
     for (int i = 1; i < argc; i++)
     {
-        if (strcmp(argv[i], "--show-console") == 0)
+        if (strcmp(argv[i], "--autostart") == 0)
+        {
+            extern bool zelda64_autostart; // ui_launcher.cpp
+            zelda64_autostart = true;
+        }
+        else if (strcmp(argv[i], "--show-console") == 0)
         {
             if (GetConsoleWindow() == nullptr)
             {
@@ -665,6 +670,15 @@ int main(int argc, char** argv) {
     REGISTER_FUNC(recomp_get_mouse_camera_deltas);
     REGISTER_FUNC(recomp_get_mouse_camera_fov);
     REGISTER_FUNC(recomp_get_mouse_camera_aim);
+    REGISTER_FUNC(recomp_get_sprint_held);
+    REGISTER_FUNC(recomp_stop_sprint);
+    REGISTER_FUNC(recomp_get_focus_presses);
+    REGISTER_FUNC(recomp_get_prompt_style);
+    REGISTER_FUNC(recomp_get_first_person_fog);
+    REGISTER_FUNC(recomp_get_texture_filter);
+    REGISTER_FUNC(recomp_set_pad_menu);
+    REGISTER_FUNC(recomp_get_definitive);
+    REGISTER_FUNC(recomp_get_camera_distance_presses);
     REGISTER_FUNC(recomp_get_mouse_camera_wheel);
     //REGISTER_FUNC(recomp_get_inverted_axes);
     //REGISTER_FUNC(recomp_get_analog_inverted_axes);

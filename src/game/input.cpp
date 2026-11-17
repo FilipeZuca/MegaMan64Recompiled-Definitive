@@ -88,6 +88,38 @@ void queue_if_enabled(SDL_Event* event) {
 }
 
 static std::atomic_bool cursor_enabled = true;
+// Sprint toggled with L3, and when the left stick last went idle (sprint stops after a short pause in movement).
+static std::atomic_bool sprint_toggled = false;
+static std::chrono::steady_clock::time_point sprint_idle_since{};
+
+// R3 presses for the target focus, consumed by the camera patch.
+static std::atomic_int focus_presses = 0;
+
+int recomp::consume_focus_presses() {
+    return focus_presses.exchange(0);
+}
+
+// Whether a PlayStation pad is connected, so prompts use Sony glyphs. Updated on connect/disconnect because the per-frame
+// controller list is only refreshed once the game is running, which left the launcher and menus on Xbox glyphs.
+static std::atomic_bool sony_controller_connected = false;
+
+static void update_sony_controller_connected() {
+    bool found = false;
+    for (const auto& [id, state] : InputState.controller_states) {
+        (void)id;
+        switch (state.controller ? SDL_GameControllerGetType(state.controller) : SDL_CONTROLLER_TYPE_UNKNOWN) {
+        case SDL_CONTROLLER_TYPE_PS3:
+        case SDL_CONTROLLER_TYPE_PS4:
+        case SDL_CONTROLLER_TYPE_PS5:
+            found = true;
+            break;
+        default:
+            break;
+        }
+    }
+    sony_controller_connected = found;
+}
+
 // True while the cursor is captured for the mouse camera, which is the only time mouse buttons reach the game.
 static std::atomic_bool mouse_camera_cursor_locked = false;
 // Bitmask of held mouse buttons, indexed by SDL_BUTTON_* values.
@@ -116,7 +148,75 @@ bool should_override_keystate(SDL_Scancode key, SDL_Keymod mod) {
     return false;        
 }
 
+// Button prompts follow the device used last: keyboard/mouse, or a PlayStation or other (Xbox style) pad.
+static std::atomic_int last_prompt_style = -1; // recomp::PromptStyle, -1 until something is used.
+
+static void track_prompt_style(SDL_Event* event) {
+    SDL_JoystickID which = -1;
+    switch (event->type) {
+    case SDL_EventType::SDL_KEYDOWN:
+    case SDL_EventType::SDL_MOUSEBUTTONDOWN:
+        last_prompt_style = (int)recomp::PromptStyle::Keyboard;
+        return;
+    case SDL_EventType::SDL_CONTROLLERBUTTONDOWN:
+        which = event->cbutton.which;
+        break;
+    case SDL_EventType::SDL_CONTROLLERAXISMOTION:
+        if (event->caxis.value > 16000 || event->caxis.value < -16000) {
+            which = event->caxis.which;
+        }
+        break;
+    default:
+        break;
+    }
+    if (which >= 0) {
+        SDL_GameController* pad = SDL_GameControllerFromInstanceID(which);
+        switch (pad ? SDL_GameControllerGetType(pad) : SDL_CONTROLLER_TYPE_UNKNOWN) {
+        case SDL_CONTROLLER_TYPE_PS3:
+        case SDL_CONTROLLER_TYPE_PS4:
+        case SDL_CONTROLLER_TYPE_PS5:
+            last_prompt_style = (int)recomp::PromptStyle::PlayStation;
+            break;
+        default:
+            last_prompt_style = (int)recomp::PromptStyle::Xbox;
+            break;
+        }
+    }
+}
+
+char recomp::get_keyboard_binding_char(recomp::GameInput input) {
+    for (size_t binding = 0; binding < 2; binding++) {
+        recomp::InputField field = recomp::get_input_binding(input, binding, recomp::InputDevice::Keyboard);
+        if (field.input_type == (uint32_t)InputType::Keyboard) {
+            const char* name = SDL_GetScancodeName((SDL_Scancode)field.input_id);
+            if (name != nullptr && name[0] != 0) {
+                return (char)toupper((unsigned char)name[0]);
+            }
+        }
+    }
+    return 0;
+}
+
+int recomp::get_controller_binding_button(recomp::GameInput input) {
+    for (size_t binding = 0; binding < 2; binding++) {
+        recomp::InputField field = recomp::get_input_binding(input, binding, recomp::InputDevice::Controller);
+        if (field.input_type == (uint32_t)InputType::ControllerDigital) {
+            return (int)field.input_id;
+        }
+    }
+    return -1;
+}
+
+recomp::PromptStyle recomp::get_prompt_style() {
+    int style = last_prompt_style.load();
+    if (style < 0) {
+        return sony_controller_connected.load() ? PromptStyle::PlayStation : PromptStyle::Xbox;
+    }
+    return (PromptStyle)style;
+}
+
 bool sdl_event_filter(void* userdata, SDL_Event* event) {
+    track_prompt_style(event);
     switch (event->type) {
     case SDL_EventType::SDL_KEYDOWN:
         {
@@ -140,6 +240,15 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
                     set_scanned_input({(uint32_t)InputType::Keyboard, keyevent->keysym.scancode});
                 }
             } else {
+                // C swaps first/third person (fixed key; controllers use L3+R3).
+                if (keyevent->keysym.scancode == SDL_Scancode::SDL_SCANCODE_C && mouse_camera_cursor_locked &&
+                    !recompui::is_context_capturing_input()) {
+                    zelda64::toggle_mouse_camera_perspective();
+                }
+                // F locks on to an enemy, like R3 (fixed key).
+                if (keyevent->keysym.scancode == SDL_Scancode::SDL_SCANCODE_F && !recompui::is_context_capturing_input()) {
+                    focus_presses++;
+                }
                 if (!should_override_keystate(keyevent->keysym.scancode, static_cast<SDL_Keymod>(keyevent->keysym.mod))) {
                     queue_if_enabled(event);
                 }
@@ -155,6 +264,7 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
                 printf("  Instance ID: %d\n", SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller)));
                 ControllerState& state = InputState.controller_states[SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller))];
                 state.controller = controller;
+                update_sony_controller_connected();
 
                 if (SDL_GameControllerHasSensor(controller, SDL_SensorType::SDL_SENSOR_GYRO) && SDL_GameControllerHasSensor(controller, SDL_SensorType::SDL_SENSOR_ACCEL)) {
                     SDL_GameControllerSetSensorEnabled(controller, SDL_SensorType::SDL_SENSOR_GYRO, SDL_TRUE);
@@ -168,6 +278,7 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
             SDL_ControllerDeviceEvent* controller_event = &event->cdevice;
             printf("Controller removed: %d\n", controller_event->which);
             InputState.controller_states.erase(controller_event->which);
+            update_sony_controller_connected();
         }
         break;
     case SDL_EventType::SDL_QUIT: {
@@ -187,9 +298,6 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
             if (scanning_device == recomp::InputDevice::Keyboard) {
                 set_scanned_input({(uint32_t)InputType::Mouse, button_event->button});
                 break;
-            }
-            if (button_event->button == SDL_BUTTON_MIDDLE && mouse_camera_cursor_locked) {
-                zelda64::toggle_mouse_camera_perspective();
             }
             if (button_event->button == SDL_BUTTON_RIGHT) {
                 right_press_time = std::chrono::steady_clock::now();
@@ -241,6 +349,34 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
                 set_scanned_input({(uint32_t)InputType::ControllerDigital, button_event->button});
             }
         } else {
+            // L3+R3 swaps first and third person, like the mouse camera's middle click. R3 alone is lock-on (C-Right).
+            SDL_GameControllerButton pressed = (SDL_GameControllerButton)event->cbutton.button;
+            if ((pressed == SDL_CONTROLLER_BUTTON_RIGHTSTICK || pressed == SDL_CONTROLLER_BUTTON_LEFTSTICK) &&
+                !recomp::game_input_disabled() && ultramodern::is_game_started()) {
+                SDL_GameController* pad = SDL_GameControllerFromInstanceID(event->cbutton.which);
+                SDL_GameControllerButton other = pressed == SDL_CONTROLLER_BUTTON_RIGHTSTICK ? SDL_CONTROLLER_BUTTON_LEFTSTICK : SDL_CONTROLLER_BUTTON_RIGHTSTICK;
+                // Only a real chord: both sticks clicked within a short time. A stick that has been held (or reads as
+                // held) for a while doesn't count, otherwise clicking L3 to sprint through a door could swap the view.
+                static std::chrono::steady_clock::time_point stick_press_time[2];
+                constexpr auto chord_window = std::chrono::milliseconds(250);
+                auto now = std::chrono::steady_clock::now();
+                size_t self_index = pressed == SDL_CONTROLLER_BUTTON_RIGHTSTICK ? 1 : 0;
+                stick_press_time[self_index] = now;
+                if (pad != nullptr && SDL_GameControllerGetButton(pad, other) && now - stick_press_time[1 - self_index] < chord_window) {
+                    stick_press_time[0] = stick_press_time[1] = {};
+                    zelda64::toggle_mouse_camera_perspective();
+                    // The L3 half of the chord already started a sprint, cancel it.
+                    sprint_toggled = false;
+                } else if (pressed == SDL_CONTROLLER_BUTTON_RIGHTSTICK) {
+                    // R3 alone: target focus (Souls-like lock-on camera), handled by the camera patch.
+                    focus_presses++;
+                } else if (pressed == SDL_CONTROLLER_BUTTON_LEFTSTICK) {
+                    // L3 starts sprinting. It stops when Mega Man stops (stick released, or the game reports he is no
+                    // longer walking), and L3 has to be clicked again.
+                    sprint_toggled = true;
+                    sprint_idle_since = {};
+                }
+            }
             queue_if_enabled(event);
         }
         break;
@@ -379,49 +515,57 @@ constexpr SDL_GameControllerButton SDL_CONTROLLER_BUTTON_WEST = SDL_CONTROLLER_B
 constexpr SDL_GameControllerButton SDL_CONTROLLER_BUTTON_NORTH = SDL_CONTROLLER_BUTTON_Y;
 
 const recomp::DefaultN64Mappings recomp::default_n64_keyboard_mappings = {
+    // Space: jump
     .a = {
         {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_SPACE}
     },
+    // Left click: buster (Backspace: back in menus)
     .b = {
-        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_LSHIFT},
-        {.input_type = (uint32_t)InputType::Mouse, .input_id = SDL_BUTTON_LEFT}
+        {.input_type = (uint32_t)InputType::Mouse, .input_id = SDL_BUTTON_LEFT},
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_BACKSPACE}
     },
     .l = {
-        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_E}
     },
     .r = {
-        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_R}
     },
+    // Q: side hop (modern_pad); previous page in menus
     .z = {
         {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_Q}
     },
+    // Enter / I: pause and inventory
     .start = {
-        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_RETURN}
-    },
-    .c_left = {
-        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_LEFT},
-        {.input_type = (uint32_t)InputType::Mouse, .input_id = SDL_BUTTON_RIGHT}
-    },
-    .c_right = {
-        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_RIGHT}
-    },
-    .c_up = {
-        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_UP}
-    },
-    .c_down = {
-        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_DOWN}
-    },
-    .dpad_left = {
-        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_J}
-    },
-    .dpad_right = {
-        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_L}
-    },
-    .dpad_up = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_RETURN},
         {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_I}
     },
+    // Middle click / R: special weapon; next page in menus
+    .c_left = {
+        {.input_type = (uint32_t)InputType::Mouse, .input_id = SDL_BUTTON_MIDDLE},
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_R}
+    },
+    .c_right = {
+    },
+    // M / Tab: map
+    .c_up = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_M},
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_TAB}
+    },
+    // E: interact; Ctrl: the same button, which walks slowly when there is nothing to interact with
+    .c_down = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_E},
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_LCTRL}
+    },
+    // Arrows: the game's d-pad (menus, Yes/No)
+    .dpad_left = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_LEFT}
+    },
+    .dpad_right = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_RIGHT}
+    },
+    .dpad_up = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_UP}
+    },
     .dpad_down = {
-        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_K}
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_DOWN}
     },
     .analog_left = {
         {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_A}
@@ -443,43 +587,52 @@ const recomp::DefaultN64Mappings recomp::default_n64_keyboard_mappings = {
     },
     .apply_menu = {
         {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_F}
+    },
+    .camera_distance = {
+        {.input_type = (uint32_t)InputType::Keyboard, .input_id = SDL_SCANCODE_V}
     }
 };
 
+// DualSense layout (Circle confirms / Cross goes back in menus: modern_pad in patches/mouse_camera.c). The right stick (camera), L2 (aim) and L3+R3 (first/third person) are read directly in
+// consume_mouse_camera_deltas, get_mouse_camera_aim_held and the controller event handler, so they are not bound here.
 const recomp::DefaultN64Mappings recomp::default_n64_controller_mappings = {
+    // Cross: jump
     .a = {
         {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_SOUTH},
     },
+    // R2: buster
     .b = {
-        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_WEST},
+        {.input_type = (uint32_t)InputType::ControllerAnalog, .input_id = SDL_CONTROLLER_AXIS_TRIGGERRIGHT + 1},
     },
+    // L1: strafe while held (patches/mouse_camera.c modern_pad turns the stick into L/R); previous page in menus
     .l = {
-        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_LEFTSTICK},
-    },
-    .r = {
-        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_RIGHTSHOULDER},
-    },
-    .z = {
         {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_LEFTSHOULDER},
     },
+    // Strafe right comes from L1 + stick, next page from R1 (C-Left in menus), see modern_pad
+    .r = {
+    },
+    // Square: side hop (modern_pad)
+    .z = {
+        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_WEST},
+    },
+    // Options: pause
     .start = {
         {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_START},
     },
+    // R1: special weapon
     .c_left = {
-        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_NORTH},
-        {.input_type = (uint32_t)InputType::ControllerAnalog, .input_id = SDL_CONTROLLER_AXIS_TRIGGERRIGHT + 1},
+        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_RIGHTSHOULDER},
     },
+    // The game's own lock-on/look stops Mega Man and blocks jumping; R3 focus (read directly) replaces it
     .c_right = {
-        {.input_type = (uint32_t)InputType::ControllerAnalog, .input_id = SDL_CONTROLLER_AXIS_RIGHTX + 1},
-        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_EAST},
     },
+    // Triangle: select
     .c_up = {
-        {.input_type = (uint32_t)InputType::ControllerAnalog, .input_id = -(SDL_CONTROLLER_AXIS_RIGHTY + 1)},
-        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_RIGHTSTICK},
+        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_NORTH},
     },
+    // Circle: action
     .c_down = {
         {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_EAST},
-        {.input_type = (uint32_t)InputType::ControllerAnalog, .input_id = SDL_CONTROLLER_AXIS_TRIGGERLEFT + 1},
     },
     .dpad_left = {
         {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_DPAD_LEFT},
@@ -505,8 +658,9 @@ const recomp::DefaultN64Mappings recomp::default_n64_controller_mappings = {
     .analog_down = {
         {.input_type = (uint32_t)InputType::ControllerAnalog, .input_id = SDL_CONTROLLER_AXIS_LEFTY + 1},
     },
+    // Touchpad click: Create is used for the camera distance below.
     .toggle_menu = {
-        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_BACK},
+        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_TOUCHPAD},
     },
     .accept_menu = {
         {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_SOUTH},
@@ -514,8 +668,15 @@ const recomp::DefaultN64Mappings recomp::default_n64_controller_mappings = {
     .apply_menu = {
         {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_WEST},
         {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_START}
+    },
+    // Create (Share): cycle the third person camera distance.
+    .camera_distance = {
+        {.input_type = (uint32_t)InputType::ControllerDigital, .input_id = SDL_CONTROLLER_BUTTON_BACK},
     }
 };
+
+static void update_sprint_idle();
+static void update_camera_distance_input();
 
 void recomp::poll_inputs() {
     InputState.keys = SDL_GetKeyboardState(&InputState.numkeys);
@@ -533,6 +694,9 @@ void recomp::poll_inputs() {
             }
         }
     }
+
+    update_sprint_idle();
+    update_camera_distance_input();
 
     // Read the deltas while resetting them to zero.
     {
@@ -647,9 +811,80 @@ bool recomp::keyboard_bindings_use_mouse() {
     return false;
 }
 
+// Strongest value of a controller axis across all connected controllers, in [-1, 1].
+// shortcut: reads the stick and triggers directly instead of through a rebindable input, add GameInputs if users ask to remap camera/aim.
+static float controller_axis(SDL_GameControllerAxis axis) {
+    float ret = 0.0f;
+    std::lock_guard lock{ InputState.cur_controllers_mutex };
+    for (const auto& controller : InputState.cur_controllers) {
+        float cur_val = SDL_GameControllerGetAxis(controller, axis) * (1 / 32768.0f);
+        if (fabsf(cur_val) > fabsf(ret)) {
+            ret = cur_val;
+        }
+    }
+    return std::clamp(ret, -1.0f, 1.0f);
+}
+
+// Called once per game frame from poll_inputs: stops sprinting once the left stick has rested for a moment.
+static void update_sprint_idle() {
+    constexpr auto idle_timeout = std::chrono::milliseconds(150);
+    if (!sprint_toggled) {
+        return;
+    }
+    float lx = controller_axis(SDL_CONTROLLER_AXIS_LEFTX);
+    float ly = controller_axis(SDL_CONTROLLER_AXIS_LEFTY);
+    auto now = std::chrono::steady_clock::now();
+    if (lx * lx + ly * ly > 0.2f * 0.2f) {
+        sprint_idle_since = {};
+    } else if (sprint_idle_since == std::chrono::steady_clock::time_point{}) {
+        sprint_idle_since = now;
+    } else if (now - sprint_idle_since > idle_timeout) {
+        sprint_toggled = false;
+    }
+}
+
+// Camera Distance input: counted on its rising edge once per game frame, consumed by the camera patch.
+static std::atomic_int camera_distance_presses = 0;
+static bool camera_distance_was_down = false;
+
+static void update_camera_distance_input() {
+    bool down = false;
+    for (size_t i = 0; i < recomp::bindings_per_input; i++) {
+        for (recomp::InputDevice device : { recomp::InputDevice::Controller, recomp::InputDevice::Keyboard }) {
+            down |= recomp::get_input_digital(recomp::get_input_binding(recomp::GameInput::CAMERA_DISTANCE, i, device));
+        }
+    }
+    if (down && !camera_distance_was_down && !recomp::game_input_disabled()) {
+        camera_distance_presses++;
+    }
+    camera_distance_was_down = down;
+}
+
+int recomp::consume_camera_distance_presses() {
+    return camera_distance_presses.exchange(0);
+}
+
+void recomp::stop_sprint() {
+    sprint_toggled = false;
+}
+
+bool recomp::get_sprint_held() {
+    // Left Shift sprints while held (fixed key, like C for the view swap).
+    bool shift = recomp::get_input_digital(recomp::InputField{(uint32_t)InputType::Keyboard, SDL_SCANCODE_LSHIFT});
+    return (sprint_toggled || shift) && !recomp::game_input_disabled();
+}
+
 bool recomp::get_mouse_camera_aim_held() {
-    return zelda64::get_mouse_camera_mode() == zelda64::MouseCameraMode::ThirdPerson && mouse_button_state(SDL_BUTTON_RIGHT) &&
-        std::chrono::steady_clock::now() - right_press_time.load() >= right_tap_threshold;
+    zelda64::MouseCameraMode mode = zelda64::get_mouse_camera_mode();
+    if (mode == zelda64::MouseCameraMode::Off || recomp::game_input_disabled()) {
+        return false;
+    }
+    // L2 aims: over the shoulder in third person, zoomed in first person.
+    if (controller_axis(SDL_CONTROLLER_AXIS_TRIGGERLEFT) > axis_threshold) {
+        return true;
+    }
+    // Right mouse button: aim, like L2.
+    return mouse_button_state(SDL_BUTTON_RIGHT);
 }
 
 bool recomp::get_mouse_camera_special_tap() {
@@ -774,10 +1009,13 @@ void recomp::consume_mouse_camera_deltas(float* x, float* y) {
     constexpr auto stale_threshold = std::chrono::milliseconds(200);
 
     std::array<float, 2> cur_delta;
+    std::chrono::steady_clock::time_point prev_consume;
+    bool stale;
     {
         std::lock_guard lock{ InputState.pending_input_mutex };
         auto now = std::chrono::steady_clock::now();
-        bool stale = now - InputState.mouse_camera_last_consume > stale_threshold;
+        prev_consume = InputState.mouse_camera_last_consume;
+        stale = now - prev_consume > stale_threshold;
         cur_delta = stale ? std::array<float, 2>{ 0.0f, 0.0f } : InputState.mouse_camera_delta;
         InputState.mouse_camera_delta = { 0.0f, 0.0f };
         InputState.mouse_camera_last_consume = now;
@@ -786,6 +1024,33 @@ void recomp::consume_mouse_camera_deltas(float* x, float* y) {
     float sensitivity = (float)recomp::get_mouse_sensitivity() / 100.0f;
     *x = cur_delta[0] * sensitivity;
     *y = cur_delta[1] * sensitivity;
+
+    // Right stick, in the same units as mouse counts. The patch turns one count into 12 (yaw) or 8 (pitch) angle
+    // units out of 4096, so 170 counts per second at full tilt is about 180 degrees per second of yaw.
+    constexpr float stick_counts_per_second = 170.0f;
+    constexpr float stick_deadzone = 0.12f;
+    if (stale || recomp::game_input_disabled()) {
+        return;
+    }
+    float dt = std::chrono::duration<float>(std::chrono::steady_clock::now() - prev_consume).count();
+    float sx = controller_axis(SDL_CONTROLLER_AXIS_RIGHTX);
+    float sy = controller_axis(SDL_CONTROLLER_AXIS_RIGHTY);
+    float mag = sqrtf(sx * sx + sy * sy);
+    // Turn acceleration as in modern shooters: holding the stick at the edge ramps yaw up to 1.7x after a short delay,
+    // so precise aim keeps the slow curve but big turns don't take forever.
+    constexpr float ramp_start = 0.9f, ramp_delay = 0.15f, ramp_time = 0.35f, ramp_max = 0.7f;
+    static float edge_time = 0.0f;
+    if (mag > stick_deadzone) {
+        // Radial deadzone, then a squared curve for fine aim near the center and fast turns at full tilt.
+        float scaled = std::min((mag - stick_deadzone) / (1.0f - stick_deadzone), 1.0f);
+        float gain = scaled * scaled / mag;
+        edge_time = scaled > ramp_start ? edge_time + dt : 0.0f;
+        float ramp = 1.0f + ramp_max * std::clamp((edge_time - ramp_delay) / ramp_time, 0.0f, 1.0f);
+        *x += sx * gain * ramp * stick_counts_per_second * dt;
+        *y += sy * gain * stick_counts_per_second * dt;
+    } else {
+        edge_time = 0.0f;
+    }
 }
 
 void recomp::apply_joystick_deadzone(float x_in, float y_in, float* x_out, float* y_out) {
@@ -847,7 +1112,39 @@ bool recomp::all_input_disabled() {
     return scanning_device != recomp::InputDevice::COUNT;
 }
 
+// shortcut: one style for all pads and no Nintendo glyphs, split per controller if mixed setups need it.
+static bool sony_prompts() {
+    // Controller glyphs: Sony ones when the last pad used was a PlayStation pad (or, before any input, one is connected).
+    recomp::PromptStyle style = recomp::get_prompt_style();
+    return style == recomp::PromptStyle::PlayStation ||
+        (style == recomp::PromptStyle::Keyboard && sony_controller_connected.load());
+}
+
 std::string controller_button_to_string(SDL_GameControllerButton button) {
+    if (sony_prompts()) {
+        switch (button) {
+        case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_A:
+            return PF_SONY_A; // Cross
+        case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_B:
+            return PF_SONY_B; // Circle
+        case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_X:
+            return PF_SONY_X; // Square
+        case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_Y:
+            return PF_SONY_Y; // Triangle
+        case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_BACK:
+            return PF_SONY_DUALSENSE_SHARE;
+        case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_START:
+            return PF_SONY_DUALSENSE_OPTIONS;
+        case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
+            return PF_SONY_LEFT_SHOULDER;
+        case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+            return PF_SONY_RIGHT_SHOULDER;
+        case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_TOUCHPAD:
+            return PF_SONY_DUALSENSE_TOUCHPAD;
+        default:
+            break; // Sticks, d-pad and home share glyphs with other pads.
+        }
+    }
     switch (button) {
     case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_A:
         return PF_GAMEPAD_A;
@@ -990,8 +1287,14 @@ std::string controller_axis_to_string(int axis) {
     case SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_RIGHTY:
         return positive ? "\u21C3" : "\u21BF";
     case SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_TRIGGERLEFT:
+        if (sony_prompts()) {
+            return PF_SONY_LEFT_TRIGGER;
+        }
         return positive ? "\u2196" : "\u21DC";
     case SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
+        if (sony_prompts()) {
+            return PF_SONY_RIGHT_TRIGGER;
+        }
         return positive ? "\u2197" : "\u21DD";
     default:
         return "Axis " + std::to_string(actual_axis) + (positive ? '+' : '-');

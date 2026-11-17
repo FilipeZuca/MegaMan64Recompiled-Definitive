@@ -113,6 +113,56 @@ namespace zelda64 {
         {zelda64::FirstPersonStrafeMode::Off, "Off"}
     });
 
+    // Fog in first person: the game's own fog doesn't survive the close near plane, so it is either off or a light haze.
+    // Values are shared with patches/mouse_camera.h.
+    enum class FirstPersonFogMode {
+        Off,
+        Subtle,
+        OptionCount
+    };
+
+    NLOHMANN_JSON_SERIALIZE_ENUM(zelda64::FirstPersonFogMode, {
+        {zelda64::FirstPersonFogMode::Off, "Off"},
+        {zelda64::FirstPersonFogMode::Subtle, "Subtle"}
+    });
+
+    FirstPersonFogMode get_first_person_fog_mode();
+    void set_first_person_fog_mode(FirstPersonFogMode mode);
+
+    // Off plays like the base port: the modern camera reads as Off and the patches skip the layout, sprint, dodge and
+    // prompts (recomp_get_definitive). Values are shared with patches/mouse_camera.h.
+    enum class DefinitiveMode {
+        On,
+        Off,
+        OptionCount
+    };
+
+    NLOHMANN_JSON_SERIALIZE_ENUM(zelda64::DefinitiveMode, {
+        {zelda64::DefinitiveMode::On, "On"},
+        {zelda64::DefinitiveMode::Off, "Off"}
+    });
+
+    DefinitiveMode get_definitive_mode();
+    void set_definitive_mode(DefinitiveMode mode);
+
+    // Texture filtering. NearestTerrain is bilinear everywhere except the ground and walls, which draw point sampled so
+    // the small clamped windows they are built from meet without a filtered border. Values shared with patches/gfx_patches.c.
+    enum class TextureFilterMode {
+        ThreePoint,
+        Bilinear,
+        NearestTerrain,
+        OptionCount
+    };
+
+    NLOHMANN_JSON_SERIALIZE_ENUM(zelda64::TextureFilterMode, {
+        {zelda64::TextureFilterMode::ThreePoint, "ThreePoint"},
+        {zelda64::TextureFilterMode::Bilinear, "Bilinear"},
+        {zelda64::TextureFilterMode::NearestTerrain, "NearestTerrain"}
+    });
+
+    TextureFilterMode get_texture_filter_mode();
+    void set_texture_filter_mode(TextureFilterMode mode);
+
     FirstPersonStrafeMode get_first_person_strafe_mode();
     void set_first_person_strafe_mode(FirstPersonStrafeMode mode);
 
@@ -120,7 +170,9 @@ namespace zelda64 {
     int get_mouse_camera_fov();
     void set_mouse_camera_fov(int fov);
 
+    // The mode in effect: Off while Definitive Features is Off. The setting itself is get_mouse_camera_mode_setting.
     MouseCameraMode get_mouse_camera_mode();
+    MouseCameraMode get_mouse_camera_mode_setting();
     void set_mouse_camera_mode(MouseCameraMode mode);
     // Swaps between first and third person. Does nothing while the mouse camera is off.
     void toggle_mouse_camera_perspective();

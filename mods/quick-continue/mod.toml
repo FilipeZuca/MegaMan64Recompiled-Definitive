@@ -1,0 +1,23 @@
+[manifest]
+id = "mm64_quick_continue"
+version = "0.1.0"
+display_name = "Quick Continue"
+description = """
+Goes from boot straight to your save: presses Start through the title, menu and file select, then skips the opening \
+text until Mega Man can move. After clicking Start game, leave the controller alone for about ten seconds."""
+short_description = "Boot straight into your save."
+authors = [ "akuz" ]
+
+# MegaMan64Recompiled kept Zelda's mod_game_id ("mm") in src/main/main.cpp.
+game_id = "mm"
+minimum_recomp_version = "0.9.0"
+dependencies = [ ]
+optional_dependencies = [ ]
+native_libraries = [ ]
+
+[inputs]
+elf_path = "build/mod.elf"
+mod_filename = "mm64_quick_continue"
+func_reference_syms_file = "../../MegaMan64RecompSyms/megaman64.us.rev1.syms.toml"
+data_reference_syms_files = [ "../../MegaMan64RecompSyms/megaman64.us.rev1.datasyms.toml" ]
+additional_files = [ ]

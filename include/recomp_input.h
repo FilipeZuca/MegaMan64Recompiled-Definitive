@@ -26,7 +26,7 @@ namespace recomp {
         DEFINE_INPUT(C_UP, 0x0008, "Map") \
         DEFINE_INPUT(C_LEFT, 0x0002, "Special Weapon") \
         DEFINE_INPUT(C_DOWN, 0x0004, "Interact") \
-        DEFINE_INPUT(C_RIGHT, 0x0001, "Look") \
+        DEFINE_INPUT(C_RIGHT, 0x0001, "Lock-On / Look") \
         DEFINE_INPUT(DPAD_UP, 0x0800, "Move Up") \
         DEFINE_INPUT(DPAD_RIGHT, 0x0100, "Move Right") \
         DEFINE_INPUT(DPAD_DOWN, 0x0400, "Move Down") \
@@ -42,7 +42,8 @@ namespace recomp {
     #define DEFINE_RECOMP_UI_INPUTS() \
         DEFINE_INPUT(TOGGLE_MENU, 0, "Toggle Menu") \
         DEFINE_INPUT(ACCEPT_MENU, 0, "Accept (Menu)") \
-        DEFINE_INPUT(APPLY_MENU, 0, "Apply (Menu)")
+        DEFINE_INPUT(APPLY_MENU, 0, "Apply (Menu)") \
+        DEFINE_INPUT(CAMERA_DISTANCE, 0, "Camera Distance")
 
     #define DEFINE_ALL_INPUTS() \
         DEFINE_N64_BUTTON_INPUTS() \
@@ -83,6 +84,20 @@ namespace recomp {
     bool keyboard_bindings_use_mouse();
     // Right mouse button held for over the shoulder aiming, only in the third person mouse camera.
     bool get_mouse_camera_aim_held();
+    // Presses of the Camera Distance input since the last call.
+    int consume_camera_distance_presses();
+    // Sprint toggled with L3, off after the left stick rests.
+    bool get_sprint_held();
+    // Which button glyphs to show: follows the last device used.
+    enum class PromptStyle { PlayStation = 0, Xbox = 1, Keyboard = 2 };
+    PromptStyle get_prompt_style();
+    // First character of the keyboard key bound to an input (0 if none), for keyboard prompts.
+    char get_keyboard_binding_char(GameInput input);
+    // SDL controller button bound to an input (first digital binding), or -1.
+    int get_controller_binding_button(GameInput input);
+    // R3 presses since the last call, for the target focus.
+    int consume_focus_presses();
+    void stop_sprint();
     // A quick right click in the third person mouse camera, which uses the special weapon.
     bool get_mouse_camera_special_tap();
     // Mouse wheel notches since the previous call, positive when scrolling up.
@@ -129,6 +144,7 @@ namespace recomp {
         std::vector<InputField> toggle_menu;
         std::vector<InputField> accept_menu;
         std::vector<InputField> apply_menu;
+        std::vector<InputField> camera_distance;
     };
 
     inline const std::vector<InputField>& get_default_mapping_for_input(const DefaultN64Mappings& defaults, const GameInput input) {
@@ -155,6 +171,7 @@ namespace recomp {
             case GameInput::TOGGLE_MENU: return defaults.toggle_menu;
             case GameInput::ACCEPT_MENU: return defaults.accept_menu;
             case GameInput::APPLY_MENU: return defaults.apply_menu;
+            case GameInput::CAMERA_DISTANCE: return defaults.camera_distance;
             default: return empty_input_field;
         }
     }

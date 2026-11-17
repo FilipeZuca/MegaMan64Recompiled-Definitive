@@ -266,6 +266,89 @@ text =	"""
 			*ctx = savedCtx;
 		"""
 
+#Draw distance - func_8005471C sets each area's far plane ($a3); the object/terrain cull distance and the fog follow it.
+# Scale it up so more of the level is drawn before the fog, instead of objects popping in when Mega Man gets close.
+[[patches.hook]]
+func = "func_8005471C_2FB1C"
+before_vram = 0x8005471C
+text = """
+	{
+		recomp_context savedCtx = *ctx;
+		ctx->r4 = savedCtx.r7;
+		draw_distance_scale(rdram, ctx);
+		gpr scaledFar = ctx->r2;
+		*ctx = savedCtx;
+		ctx->r7 = scaledFar;
+	}
+"""
+
+#Draw distance - raise the far plane cap from 0x3800 to 0x7000 so the scaled distance isn't clamped back
+[[patches.instruction]]
+func = "func_8005471C_2FB1C"
+vram = 0x800547EC
+value = 0x2CE27001 # sltiu $v0, $a3, 0x7001
+
+[[patches.instruction]]
+func = "func_8005471C_2FB1C"
+vram = 0x800547F8
+value = 0x24077000 # addiu $a3, $zero, 0x7000
+
+#Sky scroll speed - func_80037F78 scrolls each sky layer by the camera yaw (lh $v0, 0($s6)) times the layer rate
+# ($t3). Swap in the yaw scaled by sky_scale_yaw (mouse_camera.c) so the sky keeps pace with the world on screen.
+[[patches.hook]]
+func = "func_80037F78_13378"
+before_vram = 0x80038160
+text= """
+	{
+		recomp_context savedCtx = *ctx;
+		ctx->r4 = savedCtx.r2;
+		ctx->r5 = savedCtx.r11;
+		sky_scale_yaw(rdram, ctx);
+		gpr scaledYaw = ctx->r2;
+		*ctx = savedCtx;
+		ctx->r2 = scaledYaw;
+	}
+"""
+
+#Sky parallax - func_80037F78 adds to the sky's horizontal scroll how far the camera slid sideways since the last frame
+# (0x801BF470 -= lateral move / 12). A sky at infinity doesn't shift when the eye moves, only when the view turns, and the
+# first person eye swings around the head and the third person camera orbits Mega Man, so this made the sky run ahead of
+# the world. The term ($v1 right before the subtraction) is zeroed.
+[[patches.hook]]
+func = "func_80037F78_13378"
+before_vram = 0x800380AC
+text = "ctx->r3 = 0;"
+
+#Sky vertical scroll - the camera pitch ($a1, lh -2($s6)) is scaled by sky_scale_pitch so the sky moves as far as the
+# world does when looking up or down.
+[[patches.hook]]
+func = "func_80037F78_13378"
+before_vram = 0x80038198
+text= """
+	{
+		recomp_context savedCtx = *ctx;
+		ctx->r4 = savedCtx.r5;
+		sky_scale_pitch(rdram, ctx);
+		gpr scaledPitch = ctx->r2;
+		*ctx = savedCtx;
+		ctx->r5 = scaledPitch;
+	}
+"""
+
+#Sky zoom (sky_zoom_rect in mouse_camera.c): scale each queued sky rectangle by the view's zoom. $v1 points at the
+# rectangle's G_RDPHALF_2 command, whose D(s)/D(t) word has just been written.
+[[patches.hook]]
+func = "func_8002E8FC_9CFC"
+before_vram = 0x8002ED40
+text = """
+	{
+		recomp_context savedCtx = *ctx;
+		ctx->r4 = savedCtx.r3;
+		sky_zoom_rect(rdram, ctx);
+		*ctx = savedCtx;
+	}
+"""
+
 #Stretch Sky Rectangles
 [[patches.hook]]
 func = "func_8002E8FC_9CFC"
@@ -277,6 +360,63 @@ text =	"rect_aspect_stretch(rdram, ctx);"
 func = "func_8002E8FC_9CFC"
 before_vram = 0x8002ED7C
 text =	"rect_aspect_auto(rdram, ctx);"
+
+#Terrain LOD - optional restore of the game's mid-distance level (gLodRestore in terrain_seams.c)
+[[patches.hook]]
+func = "func_8003912C_1452C"
+before_vram = 0x80039CEC
+text = """
+	{
+		recomp_context savedCtx = *ctx;
+		ctx->r4 = savedCtx.r3;
+		ctx->r5 = savedCtx.r13;
+		ctx->r6 = savedCtx.r16;
+		terrain_lod_pick(rdram, ctx);
+		uint64_t lod = ctx->r2;
+		*ctx = savedCtx;
+		ctx->r16 = lod;
+	}
+"""
+
+#Terrain seams - hand the full tile translation sums (before the sra 12) to terrain_seams.c
+[[patches.hook]]
+func = "func_8003912C_1452C"
+before_vram = 0x80039998
+text = """
+	{
+		recomp_context savedCtx = *ctx;
+		ctx->r4 = 0;
+		ctx->r5 = savedCtx.r5;
+		terrain_tile_sum(rdram, ctx);
+		*ctx = savedCtx;
+	}
+"""
+
+[[patches.hook]]
+func = "func_8003912C_1452C"
+before_vram = 0x800399B8
+text = """
+	{
+		recomp_context savedCtx = *ctx;
+		ctx->r4 = 1;
+		ctx->r5 = savedCtx.r4;
+		terrain_tile_sum(rdram, ctx);
+		*ctx = savedCtx;
+	}
+"""
+
+[[patches.hook]]
+func = "func_8003912C_1452C"
+before_vram = 0x80039A00
+text = """
+	{
+		recomp_context savedCtx = *ctx;
+		ctx->r4 = 2;
+		ctx->r5 = savedCtx.r6;
+		terrain_tile_sum(rdram, ctx);
+		*ctx = savedCtx;
+	}
+"""
 
 #Disable texture LOD
 [[patches.instruction]]
@@ -329,3 +469,37 @@ value = 0x24020001 # addiu $v0, $zero, 1
 func = "func_8003AFB0_163B0"
 vram = 0x8003B04C
 value = 0x28620001 # slti $v0, $v1, 1
+
+#Texture filter "Sharp Ground" - point sample the terrain windows (terrain_seams.c)
+[[patches.hook]]
+func = "func_8007F27C_5A67C"
+before_vram = 0x8007F28C
+text = """
+	{
+		recomp_context savedCtx = *ctx;
+		terrain_filter_begin(rdram, ctx);
+		*ctx = savedCtx;
+	}
+"""
+
+[[patches.hook]]
+func = "func_8007F27C_5A67C"
+before_vram = 0x8007F29C
+text = """
+	{
+		recomp_context savedCtx = *ctx;
+		terrain_filter_end(rdram, ctx);
+		*ctx = savedCtx;
+	}
+"""
+
+[[patches.hook]]
+func = "func_8007CC94_58094"
+before_vram = 0x8007D3B0
+text = """
+	{
+		recomp_context savedCtx = *ctx;
+		terrain_filter_window(rdram, ctx);
+		*ctx = savedCtx;
+	}
+"""

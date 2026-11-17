@@ -12,6 +12,7 @@
 #include "ultramodern/config.hpp"
 
 #include "zelda_render.h"
+#include "zelda_config.h"
 #include "recomp_ui.h"
 #include "concurrentqueue.h"
 
@@ -263,6 +264,8 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
     auto& cur_config = ultramodern::renderer::get_graphics_config();
     set_application_user_config(app.get(), cur_config);
     app->userConfig.developerMode = debug;
+    // Texture filter comes from the Graphics menu (zelda64::TextureFilterMode) and is applied every frame in send_dl.
+    app->userConfig.threePointFiltering = zelda64::get_texture_filter_mode() == zelda64::TextureFilterMode::ThreePoint;
     // Force gbi depth branches to prevent LODs from kicking in.
     app->enhancementConfig.f3dex.forceBranch = true;
     // Scale LODs based on the output resolution.
@@ -320,6 +323,8 @@ zelda64::renderer::RT64Context::~RT64Context() = default;
 
 void zelda64::renderer::RT64Context::send_dl(const OSTask* task) {
     check_texture_pack_actions();
+    // Live switch from the Graphics menu; RT64 reads this flag while building each frame.
+    app->userConfig.threePointFiltering = zelda64::get_texture_filter_mode() == zelda64::TextureFilterMode::ThreePoint;
     app->state->rsp->reset();
     app->interpreter->loadUCodeGBI(task->t.ucode & 0x3FFFFFF, task->t.ucode_data & 0x3FFFFFF, true);
     app->processDisplayLists(app->core.RDRAM, task->t.data_ptr & 0x3FFFFFF, 0, true);

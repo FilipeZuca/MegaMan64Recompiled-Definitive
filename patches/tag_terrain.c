@@ -6,8 +6,10 @@
 // extern u32 gCurrGfxTag;
 extern bool skip_terrain_interpolation;
 
+extern s32 gTerrainTagOffsetX, gTerrainTagOffsetZ;
+
 void recomp_tag_terrain(u16 x, u16 z) {
-    gCurrGfxTag = TAG_TERRAIN(x,z);
+    gCurrGfxTag = TAG_TERRAIN(x + gTerrainTagOffsetX, z + gTerrainTagOffsetZ);
 }
 
 void recomp_tag_terrain_transparent(u32 id) {
@@ -26,6 +28,7 @@ typedef struct {
 } UnkStructTile;
 
 
+s32 gFillTileHack = 1; // live switch (tools/re/poke.py)
 //render_fill_tile
 RECOMP_PATCH void func_800868C0_61CC0(s16 arg0, s16 arg1, s16 arg2, s16 arg3) {
     s32 var_v0;
@@ -35,11 +38,13 @@ RECOMP_PATCH void func_800868C0_61CC0(s16 arg0, s16 arg1, s16 arg2, s16 arg3) {
     UnkStructTile* temp_v0;
 
     //TODO Remove when implementing draw distance patches, as it will be redundant
-    //@recomp hardcode the tile dimensions to prevent graphical issues
-    arg0 = 0;
-    arg2 = 0;
-    arg1 = 0x7F;
-    arg3 = 0x7F;
+    //@recomp hardcode the tile dimensions to prevent graphical issues (gFillTileHack = 0 keeps the game's own, to compare)
+    if (gFillTileHack) {
+        arg0 = 0;
+        arg2 = 0;
+        arg1 = 0x7F;
+        arg3 = 0x7F;
+    }
 
     if (D_800CEA24_A9E24 != 0) {
         temp_v0 = func_800281C8_35C8(8);

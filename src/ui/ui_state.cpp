@@ -557,8 +557,10 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
         return;
     }
 
+    // Defined in ui_launcher.cpp.
+    extern bool zelda64_try_autostart();
     // Return to the launcher if no menu is open and the game isn't started.
-    if (!recompui::is_any_context_shown() && !ultramodern::is_game_started()) {
+    if (!recompui::is_any_context_shown() && !ultramodern::is_game_started() && !zelda64_try_autostart()) {
         recompui::show_context(recompui::get_launcher_context_id(), "");
     }
 

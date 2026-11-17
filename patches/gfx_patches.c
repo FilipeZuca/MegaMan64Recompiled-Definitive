@@ -6,6 +6,19 @@
 
 bool skip_all_interpolation = FALSE;
 bool skip_terrain_interpolation = FALSE;
+static bool sTerrainWrapFrame = FALSE; // Mode 3: only the terrain skips interpolation, on the frame of the loop.
+static bool sWrapFrame = FALSE; // Mega Man just crossed a world loop, see recomp_check_camera_jump.
+// Debug switches (poke.py): find what causes a one frame texture glitch.
+s32 gDbgNoInterp = 0;
+s32 gDbgNoOverlap = 0;
+s32 gDbgDrawScale = 3;
+s32 gDbgSkipMask = 0; // Bit n: never interpolate matrices tagged with id n (terrain is 10, xlu terrain 11, actors 1..7).
+s32 gDbgWrapMode = 3; // How the world loop is handled: 0 tag offset (+ actors skipped), 1 skip everything, 2 nothing.
+
+// Called by the us.rev1.toml draw distance hook: scales each area's far plane.
+s32 draw_distance_scale(s32 far) {
+    return far * gDbgDrawScale;
+}
 
 void recomp_check_camera_jump();
 
@@ -96,6 +109,63 @@ extern TaskNode D_80123FC0_FF3C0[2901];
 extern void *D_80134FC0_1103C0;
 extern GfxContext *D_8019A6A4_175AA4;
 extern Gfx *D_801A90F0_1844F0;
+
+// Menu screens (title, Load Data: loaded scene 1) keep their 2D background at 4:3, but their 3D characters are drawn
+// across the whole widescreen frame and showed up on the black side bars. Black bars are drawn over both sides last.
+extern u8 D_801BC380_197780[]; // +0xD0: loaded scene (u16)
+s32 gMenuScissor = 1; // live switch (tools/re/poke.py)
+static bool menu_scene(void) {
+    return gMenuScissor && *(u16*)&D_801BC380_197780[0xD0] == 1;
+}
+
+// Model fixes (pieces found with RT64's draw call inspector): models that leave a crack at high resolution, fixed by
+// moving vertices in RAM. Models are loaded per area, so every half second look for each entry's vertices (a run of
+// consecutive Vtx matching `match`) and write `fixed` over them; a fixed model no longer matches. Add a row per bug.
+typedef struct {
+    s16 count;          // consecutive vertices to match (<= 4)
+    s16 match[4][3];    // their x, y, z as the game loads them
+    s16 fixed[4][3];    // the new x, y, z
+} ModelFix;
+
+static const ModelFix sModelFixes[] = {
+    // Tent door leaf (actor, trapezoid at z -400): bottom edge sat above the ground and inside the jambs, a strip of
+    // sky showed under it. Push the bottom below the ground (y 24) and behind the jambs (x +-120).
+    { 4, { { -64, -256, -400 }, { 64, -256, -400 }, { -96, 0, -400 }, { 96, 0, -400 } },
+         { { -64, -256, -400 }, { 64, -256, -400 }, { -120, 24, -400 }, { 120, 24, -400 } } },
+};
+
+s32 gModelFix = 1; // live switch (tools/re/poke.py)
+s32 gModelFixScans = 0, gModelFixed = 0; // live counters
+static s32 sModelFixFrame = 0;
+static void model_fixes_update(void) {
+    if (!gModelFix || (sModelFixFrame++ % 30) != 0) {
+        return;
+    }
+    gModelFixScans++;
+    // shortcut: scans the area/actor heap range where the models were found (0x802FAE78); widen if one is missed.
+    // Vertex arrays are only 8 byte aligned: step by 8.
+    for (u8 *p = (u8 *)0x80200000; p < (u8 *)0x80400000 - 4 * sizeof(Vtx); p += 8) {
+        Vtx *v = (Vtx *)p;
+        for (u32 f = 0; f < sizeof(sModelFixes) / sizeof(sModelFixes[0]); f++) {
+            const ModelFix *fix = &sModelFixes[f];
+            s32 i;
+            for (i = 0; i < fix->count; i++) {
+                if (v[i].v.ob[0] != fix->match[i][0] || v[i].v.ob[1] != fix->match[i][1] || v[i].v.ob[2] != fix->match[i][2]) {
+                    break;
+                }
+            }
+            if (i == fix->count) {
+                for (i = 0; i < fix->count; i++) {
+                    v[i].v.ob[0] = fix->fixed[i][0];
+                    v[i].v.ob[1] = fix->fixed[i][1];
+                    v[i].v.ob[2] = fix->fixed[i][2];
+                }
+                gModelFixed++;
+            }
+        }
+    }
+}
+
 extern void *D_801D8828_1B3C28; //unk
 extern GfxContext D_802047F0_1DFBF0;
 extern s8 D_8020489B_1DFC9B;
@@ -299,7 +369,14 @@ RECOMP_PATCH void func_800276EC_2AEC(s32 arg0) {
                     gSPMatrix(D_801A90F0_1844F0++, mtxprojectionMtx, G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
                     gSPMatrix(D_801A90F0_1844F0++, identMtx, G_MTX_PROJECTION | G_MTX_MUL | G_MTX_NOPUSH);
 
-                    gSPFogPosition(D_801A90F0_1844F0++, gfxContext->fogStart, gfxContext->fogEnd);
+                    // Original fog range: thinning it let the background show past the end of the loaded terrain.
+                    // The mouse camera's closer near plane changes how depth maps to fog, so it's remapped to keep the
+                    // fog at the same distances as the game's own camera.
+                    {
+                        s32 fogStart = gfxContext->fogStart, fogEnd = gfxContext->fogEnd;
+                        mouse_camera_fog_position(&fogStart, &fogEnd);
+                        gSPFogPosition(D_801A90F0_1844F0++, fogStart, fogEnd);
+                    }
                     gDPSetFogColor(D_801A90F0_1844F0++, gfxContext->fogRed, gfxContext->fogGreen, gfxContext->fogBlue,
                                    gfxContext->fogAlpha);
 
@@ -363,6 +440,24 @@ RECOMP_PATCH void func_800276EC_2AEC(s32 arg0) {
 
             gfxContextIndex += 1;
         } while (gfxContextIndex <= 0);
+        model_fixes_update();
+        if (menu_scene()) {
+            //@recomp Cover the widescreen side bars of the 4:3 menus with flat black.
+            // The game's scissor is the 4:3 area, which would clip bars drawn outside it: open it to the whole screen.
+            gEXPushScissor(D_801A90F0_1844F0++);
+            gEXSetScissor(D_801A90F0_1844F0++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT, 0, 0, 0, SCREEN_HEIGHT);
+            gDPPipeSync(D_801A90F0_1844F0++);
+            gDPSetCycleType(D_801A90F0_1844F0++, G_CYC_1CYCLE);
+            gDPSetRenderMode(D_801A90F0_1844F0++, G_RM_OPA_SURF, G_RM_OPA_SURF2);
+            gDPSetCombineMode(D_801A90F0_1844F0++, G_CC_PRIMITIVE, G_CC_PRIMITIVE);
+            gDPSetPrimColor(D_801A90F0_1844F0++, 0, 0, 0, 0, 0, 255);
+            gEXTextureRectangle(D_801A90F0_1844F0++, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_NONE, -16 * 4, 0, 0, SCREEN_HEIGHT * 4,
+                                0, 0, 0, 1 << 10, 1 << 10);
+            gEXTextureRectangle(D_801A90F0_1844F0++, G_EX_ORIGIN_NONE, G_EX_ORIGIN_RIGHT, SCREEN_WIDTH * 4, 0, 16 * 4,
+                                SCREEN_HEIGHT * 4, 0, 0, 0, 1 << 10, 1 << 10);
+            gDPPipeSync(D_801A90F0_1844F0++);
+            gEXPopScissor(D_801A90F0_1844F0++);
+        }
         D_8019A6A4_175AA4 = 0;
         gDPFullSync(D_801A90F0_1844F0++);
         gSPEndDisplayList(D_801A90F0_1844F0++);
@@ -391,12 +486,29 @@ RECOMP_PATCH void func_800276EC_2AEC(s32 arg0) {
 
     //@recomp reset the interpolation flag after rendering frame
     set_all_interpolation_skipped(FALSE);
+    sWrapFrame = FALSE;
+    sTerrainWrapFrame = FALSE;
     skip_terrain_interpolation = FALSE;
     recomp_printf("-----End Frame----- \n");
 }
 
 void recomp_interp(u32 id) {
-    if (all_interpolation_skipped()) {
+    if (all_interpolation_skipped() || gDbgNoInterp) {
+        gEXMatrixGroupSkipAll(D_801A90F0_1844F0++, G_EX_ID_IGNORE, G_EX_PUSH, G_MTX_MODELVIEW, G_EX_EDIT_NONE);
+        return;
+    }
+
+    if (sTerrainWrapFrame && (GET_TAG_ID(id) == TERRAIN_TAG_ID || GET_TAG_ID(id) == TERRAIN_XLU_TAG_ID)) {
+        gEXMatrixGroupSkipAll(D_801A90F0_1844F0++, G_EX_ID_IGNORE, G_EX_PUSH, G_MTX_MODELVIEW, G_EX_EDIT_NONE);
+        return;
+    }
+
+    if (gDbgSkipMask & (1 << GET_TAG_ID(id))) {
+        gEXMatrixGroupSkipAll(D_801A90F0_1844F0++, G_EX_ID_IGNORE, G_EX_PUSH, G_MTX_MODELVIEW, G_EX_EDIT_NONE);
+        return;
+    }
+
+    if (sWrapFrame && GET_TAG_ID(id) != TERRAIN_TAG_ID && GET_TAG_ID(id) != MEGAMAN_TAG_ID) {
         gEXMatrixGroupSkipAll(D_801A90F0_1844F0++, G_EX_ID_IGNORE, G_EX_PUSH, G_MTX_MODELVIEW, G_EX_EDIT_NONE);
         return;
     }
@@ -420,11 +532,48 @@ void recomp_interp(u32 id) {
 
 extern s32 D_801BC654_197A54; //Current Cutscene Pointer
 s32 sPreviousCutscene = NULL;
+// Some areas loop: when Mega Man crosses the edge he is moved by a whole chunk (7168 units in z in town) between two
+// identical copies of the scenery. Terrain tiles are tagged by their map index, so the tiles seen on both sides
+// (far ones, with the longer draw distance) would be interpolated across the jump. Instead the jump is added to the
+// tag, so the same piece of scenery keeps its tag, and only actors, which stay where they are, skip interpolation.
+extern u8 D_802049B0_1DFDB0[]; // Mega Man, position s16 x, y, z at +0x14.
+#define WORLD_JUMP_MIN 3000
+#define WORLD_CHUNK 7168
+#define TERRAIN_TILE_SIZE 512
+s32 gTerrainTagOffsetX = 0, gTerrainTagOffsetZ = 0;
+static s16 sPreviousPlayerPos[3];
+
 void recomp_check_camera_jump() {
+    s32 i;
     if (D_801BC654_197A54 != sPreviousCutscene) {
         set_all_interpolation_skipped(TRUE);
     }
     sPreviousCutscene = D_801BC654_197A54;
+    for (i = 0; i < 3; i++) {
+        s32 pos = ((s16*)(D_802049B0_1DFDB0 + 0x14))[i];
+        s32 delta = pos - sPreviousPlayerPos[i];
+        s32 size = delta < 0 ? -delta : delta;
+        sPreviousPlayerPos[i] = pos;
+        if (size > WORLD_JUMP_MIN) {
+            if (gDbgWrapMode == 2) {
+                continue;
+            }
+            if (gDbgWrapMode == 3) {
+                sTerrainWrapFrame = TRUE;
+                continue;
+            }
+            if (gDbgWrapMode == 0 && i != 1 && size >= WORLD_CHUNK - 16 && size <= WORLD_CHUNK + 16) {
+                if (i == 0) {
+                    gTerrainTagOffsetX -= delta / TERRAIN_TILE_SIZE;
+                } else {
+                    gTerrainTagOffsetZ -= delta / TERRAIN_TILE_SIZE;
+                }
+                sWrapFrame = TRUE;
+            } else {
+                set_all_interpolation_skipped(TRUE);
+            }
+        }
+    }
 }
 
 void set_all_interpolation_skipped(bool skipped) {

@@ -25,5 +25,9 @@ DECLARE_FUNC(s32, recomp_get_analog_cam_enabled);
 DECLARE_FUNC(void, recomp_get_analog_inverted_axes, s32* x, s32* y);
 DECLARE_FUNC(void, recomp_get_camera_inputs, float* x, float* y);
 DECLARE_FUNC(void, recomp_set_right_analog_suppressed, s32 suppressed);
+// Sprint toggled with L3 (patches/sprint.c).
+DECLARE_FUNC(s32, recomp_get_sprint_held);
+// Ends the current sprint, so L3 has to be clicked again.
+DECLARE_FUNC(void, recomp_stop_sprint);
 
 #endif

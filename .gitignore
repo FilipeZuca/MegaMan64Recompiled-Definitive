@@ -69,3 +69,18 @@ gamecontrollerdb.txt
 .idea
 build-*
 cmake-build-*
+# Local build folder used by the Windows build script
+cmake-build/
+
+# Mod build output
+mods/**/build/
+
+# Outputs of the debugging tools
+tools/re/__pycache__/
+tools/re/_ring/
+tools/re/marks/
+tools/re/glitches.txt
+tools/re/*.png
+tools/re/*.txt
+tools/re/*.csv
+!tools/build-windows.ps1

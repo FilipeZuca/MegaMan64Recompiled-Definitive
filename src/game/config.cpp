@@ -238,8 +238,11 @@ bool save_general_config(const std::filesystem::path& path) {
     config_json["mouse_sensitivity"] = recomp::get_mouse_sensitivity();
     config_json["joystick_deadzone"] = recomp::get_joystick_deadzone();
     config_json["analog_camera_invert_mode"] = zelda64::get_analog_camera_invert_mode();
-    config_json["mouse_camera_mode"] = zelda64::get_mouse_camera_mode();
+    config_json["mouse_camera_mode"] = zelda64::get_mouse_camera_mode_setting();
+    config_json["definitive_mode"] = zelda64::get_definitive_mode();
     config_json["first_person_strafe_mode"] = zelda64::get_first_person_strafe_mode();
+    config_json["first_person_fog_mode"] = zelda64::get_first_person_fog_mode();
+    config_json["texture_filter_mode"] = zelda64::get_texture_filter_mode();
     config_json["mouse_camera_fov"] = zelda64::get_mouse_camera_fov();
     config_json["debug_mode"] = zelda64::get_debug_mode_enabled();
 
@@ -254,8 +257,11 @@ void set_general_settings_from_json(const nlohmann::json& config_json) {
     recomp::set_mouse_sensitivity(from_or_default(config_json, "mouse_sensitivity", is_steam_deck ? 50 : 0));
     recomp::set_joystick_deadzone(from_or_default(config_json, "joystick_deadzone", 0));
     zelda64::set_analog_camera_invert_mode(from_or_default(config_json, "analog_camera_invert_mode", zelda64::AimInvertMode::On));
-    zelda64::set_mouse_camera_mode(from_or_default(config_json, "mouse_camera_mode", zelda64::MouseCameraMode::Off));
+    zelda64::set_mouse_camera_mode(from_or_default(config_json, "mouse_camera_mode", zelda64::MouseCameraMode::ThirdPerson));
+    zelda64::set_definitive_mode(from_or_default(config_json, "definitive_mode", zelda64::DefinitiveMode::On));
     zelda64::set_first_person_strafe_mode(from_or_default(config_json, "first_person_strafe_mode", zelda64::FirstPersonStrafeMode::On));
+    zelda64::set_first_person_fog_mode(from_or_default(config_json, "first_person_fog_mode", zelda64::FirstPersonFogMode::Off));
+    zelda64::set_texture_filter_mode(from_or_default(config_json, "texture_filter_mode", zelda64::TextureFilterMode::Bilinear));
     zelda64::set_mouse_camera_fov(from_or_default(config_json, "mouse_camera_fov", 70));
     zelda64::set_debug_mode_enabled(from_or_default(config_json, "debug_mode", false));
 }
@@ -311,6 +317,7 @@ void assign_all_mappings(recomp::InputDevice device, const recomp::DefaultN64Map
     assign_mapping_complete(device, recomp::GameInput::TOGGLE_MENU, values.toggle_menu);
     assign_mapping_complete(device, recomp::GameInput::ACCEPT_MENU, values.accept_menu);
     assign_mapping_complete(device, recomp::GameInput::APPLY_MENU, values.apply_menu);
+    assign_mapping_complete(device, recomp::GameInput::CAMERA_DISTANCE, values.camera_distance);
 };
 
 void zelda64::reset_input_bindings() {

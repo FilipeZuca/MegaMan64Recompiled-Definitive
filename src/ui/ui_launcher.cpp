@@ -14,6 +14,20 @@ bool mm_rom_valid = false;
 
 extern std::vector<recomp::GameEntry> supported_games;
 
+// Set by the --autostart argument: skip the launcher and start the game as soon as the ROM is known to be valid.
+bool zelda64_autostart = false;
+
+// Returns true if it started the game (once).
+bool zelda64_try_autostart() {
+    if (!zelda64_autostart || !recomp::is_rom_valid(supported_games[0].game_id)) {
+        return false;
+    }
+    zelda64_autostart = false;
+    recomp::start_game(supported_games[0].game_id);
+    recompui::hide_all_contexts();
+    return true;
+}
+
 void select_rom() {
     nfdnchar_t* native_path = nullptr;
     zelda64::open_file_dialog([](bool success, const std::filesystem::path& path) {

@@ -104,9 +104,39 @@
                         </div>
                     </div>
 
+                    <!-- definitive features (classic mode) -->
+                    <div class="config-option" data-event-mouseover="set_cur_config_index(14)">
+                        <label class="config-option__title">Definitive Features</label>
+                        <div class="config-option__list">
+                            <input
+                                type="radio"
+                                data-event-blur="set_cur_config_index(-1)"
+                                data-event-focus="set_cur_config_index(14)"
+                                name="definitive_mode"
+                                data-checked="definitive_mode"
+                                value="On"
+                                id="definitive_mode_on"
+                                style="nav-up: #invert_y_axis_mode_on; nav-down: #mouse_camera_mode_off"
+                            />
+                            <label class="config-option__tab-label" for="definitive_mode_on">On</label>
+
+                            <input
+                                type="radio"
+                                data-event-blur="set_cur_config_index(-1)"
+                                data-event-focus="set_cur_config_index(14)"
+                                name="definitive_mode"
+                                data-checked="definitive_mode"
+                                value="Off"
+                                id="definitive_mode_off"
+                                style="nav-up: #invert_y_axis_mode_off; nav-down: #mouse_camera_mode_third"
+                            />
+                            <label class="config-option__tab-label" for="definitive_mode_off">Off</label>
+                        </div>
+                    </div>
+
                     <!-- mouse camera -->
                     <div class="config-option" data-event-mouseover="set_cur_config_index(10)">
-                        <label class="config-option__title">Mouse Camera</label>
+                        <label class="config-option__title">Modern Camera</label>
                         <div class="config-option__list">
                             <input
                                 type="radio"
@@ -116,7 +146,7 @@
                                 data-checked="mouse_camera_mode"
                                 value="Off"
                                 id="mouse_camera_mode_off"
-                                style="nav-up: #invert_y_axis_mode_on; nav-down: #mouse_sensitivity_input"
+                                style="nav-up: #definitive_mode_on; nav-down: #mouse_sensitivity_input"
                             />
                             <label class="config-option__tab-label" for="mouse_camera_mode_off">Off</label>
 
@@ -128,7 +158,7 @@
                                 data-checked="mouse_camera_mode"
                                 value="ThirdPerson"
                                 id="mouse_camera_mode_third"
-                                style="nav-up: #invert_y_axis_mode_on; nav-down: #mouse_sensitivity_input"
+                                style="nav-up: #definitive_mode_on; nav-down: #mouse_sensitivity_input"
                             />
                             <label class="config-option__tab-label" for="mouse_camera_mode_third">Third Person</label>
 
@@ -140,7 +170,7 @@
                                 data-checked="mouse_camera_mode"
                                 value="FirstPerson"
                                 id="mouse_camera_mode_first"
-                                style="nav-up: #invert_y_axis_mode_off; nav-down: #mouse_sensitivity_input"
+                                style="nav-up: #definitive_mode_off; nav-down: #mouse_sensitivity_input"
                             />
                             <label class="config-option__tab-label" for="mouse_camera_mode_first">First Person</label>
                         </div>
@@ -214,6 +244,34 @@
                         </div>
                     </div>
 
+                    <!-- first person fog -->
+                    <div class="config-option" data-event-mouseover="set_cur_config_index(13)">
+                        <label class="config-option__title">Fog</label>
+                        <div class="config-option__list">
+                            <input
+                                type="radio"
+                                data-event-blur="set_cur_config_index(-1)"
+                                data-event-focus="set_cur_config_index(13)"
+                                name="first_person_fog_mode"
+                                data-checked="first_person_fog_mode"
+                                value="Off"
+                                id="first_person_fog_mode_off"
+                            />
+                            <label class="config-option__tab-label" for="first_person_fog_mode_off">Off</label>
+
+                            <input
+                                type="radio"
+                                data-event-blur="set_cur_config_index(-1)"
+                                data-event-focus="set_cur_config_index(13)"
+                                name="first_person_fog_mode"
+                                data-checked="first_person_fog_mode"
+                                value="Subtle"
+                                id="first_person_fog_mode_subtle"
+                            />
+                            <label class="config-option__tab-label" for="first_person_fog_mode_subtle">Subtle</label>
+                        </div>
+                    </div>
+
                 </div>
 
                 <!-- Descriptions -->
@@ -258,10 +316,19 @@
                     <p data-if="cur_config_index == 12">
                         Horizontal field of view in <b>First Person</b>. Third person keeps the game's own, about <b>49°</b>.
                     </p>
+                    <p data-if="cur_config_index == 14">
+                        <b>On</b> plays with this edition's modern layout, camera, aiming, lock-on, sprint, dodge and on-screen prompts. <b>Off</b> plays like the base port: the game's own camera and controls, buttons exactly as bound. Graphics fixes stay on either way.
+                    </p>
+                    <p data-if="cur_config_index == 13">
+                        Distance fog with the modern camera. <b>Off</b> removes it, since the game's fog can't be reproduced with the close view. <b>Subtle</b> adds a light haze toward the far distance.
+                    </p>
                     <p data-if="cur_config_index == 11">
                         In <b>First Person</b> with the <b>Mouse Camera</b>, moving left or right strafes sideways like a classic shooter instead of turning, since the mouse already turns Mega Man. <b>Off</b> keeps the original turning controls.
                     </p>
                     <p data-if="cur_config_index == 10">
+                        <b>Controller:</b> the <b>right stick</b> moves the camera, hold <b>L2</b> to aim over the shoulder and press <b>R3</b> to swap between first and third person. These are fixed and not listed in Setup Controls.
+                        <br />
+                        <br />
                         Play with mouse look. <b>First Person</b> puts the camera at Mega Man's eyes: the mouse turns him and tilts the view, shots follow the crosshair and a light aim assist helps near enemies. <b>Third Person</b> orbits the camera freely around him and he walks where the camera points; hold the <b>right mouse button</b> to aim over his shoulder and use the <b>mouse wheel</b> to zoom.
                         <br />
                         <br />

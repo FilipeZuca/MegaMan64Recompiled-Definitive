@@ -243,6 +243,7 @@ struct ControlOptionsContext {
     zelda64::AimInvertMode analog_camera_invert_mode;
     std::atomic<zelda64::MouseCameraMode> mouse_camera_mode;
     std::atomic<zelda64::FirstPersonStrafeMode> first_person_strafe_mode;
+    std::atomic<zelda64::FirstPersonFogMode> first_person_fog_mode;
     int mouse_camera_fov; // 45 to 110
 };
 
@@ -364,7 +365,27 @@ void zelda64::set_analog_camera_invert_mode(zelda64::AimInvertMode mode) {
     }
 }
 
+static std::atomic<zelda64::DefinitiveMode> definitive_mode = zelda64::DefinitiveMode::On;
+
+zelda64::DefinitiveMode zelda64::get_definitive_mode() {
+    return definitive_mode.load();
+}
+
+void zelda64::set_definitive_mode(zelda64::DefinitiveMode mode) {
+    definitive_mode.store(mode);
+    if (general_model_handle) {
+        general_model_handle.DirtyVariable("definitive_mode");
+    }
+}
+
 zelda64::MouseCameraMode zelda64::get_mouse_camera_mode() {
+    if (definitive_mode.load() == zelda64::DefinitiveMode::Off) {
+        return zelda64::MouseCameraMode::Off;
+    }
+    return control_options_context.mouse_camera_mode.load();
+}
+
+zelda64::MouseCameraMode zelda64::get_mouse_camera_mode_setting() {
     return control_options_context.mouse_camera_mode.load();
 }
 
@@ -388,6 +409,30 @@ void zelda64::set_mouse_camera_fov(int fov) {
     control_options_context.mouse_camera_fov = std::clamp(fov, 45, 110);
     if (general_model_handle) {
         general_model_handle.DirtyVariable("mouse_camera_fov");
+    }
+}
+
+zelda64::FirstPersonFogMode zelda64::get_first_person_fog_mode() {
+    return control_options_context.first_person_fog_mode.load();
+}
+
+static std::atomic<zelda64::TextureFilterMode> texture_filter_mode = zelda64::TextureFilterMode::Bilinear;
+
+zelda64::TextureFilterMode zelda64::get_texture_filter_mode() {
+    return texture_filter_mode.load();
+}
+
+void zelda64::set_texture_filter_mode(zelda64::TextureFilterMode mode) {
+    texture_filter_mode.store(mode);
+    if (graphics_model_handle) {
+        graphics_model_handle.DirtyVariable("texture_filter_mode");
+    }
+}
+
+void zelda64::set_first_person_fog_mode(zelda64::FirstPersonFogMode mode) {
+    control_options_context.first_person_fog_mode.store(mode);
+    if (general_model_handle) {
+        general_model_handle.DirtyVariable("first_person_fog_mode");
     }
 }
 
@@ -704,6 +749,15 @@ public:
         bind_option(constructor, "hr_option", &new_options.hr_option);
         bind_option(constructor, "msaa_option", &new_options.msaa_option);
         bind_option(constructor, "rr_option", &new_options.rr_option);
+        // Applies live (no Apply button): read by the renderer and the terrain patch every frame.
+        constructor.BindFunc("texture_filter_mode",
+            [](Rml::Variant& out) { get_option(zelda64::get_texture_filter_mode(), out); },
+            [](const Rml::Variant& in) {
+                zelda64::TextureFilterMode mode;
+                set_option(mode, in);
+                zelda64::set_texture_filter_mode(mode);
+            }
+        );
         constructor.BindFunc("rr_manual_value",
             [](Rml::Variant& out) {
                 out = new_options.rr_manual_value;
@@ -1005,11 +1059,27 @@ public:
         bind_option(constructor, "invert_y_axis_mode", &control_options_context.invert_y_axis_mode);
         bind_option(constructor, "analog_camera_invert_mode", &control_options_context.analog_camera_invert_mode);
         constructor.BindFunc("mouse_camera_mode",
-            [](Rml::Variant& out) { get_option(zelda64::get_mouse_camera_mode(), out); },
+            [](Rml::Variant& out) { get_option(zelda64::get_mouse_camera_mode_setting(), out); },
             [](const Rml::Variant& in) {
                 zelda64::MouseCameraMode mode;
                 set_option(mode, in);
                 zelda64::set_mouse_camera_mode(mode);
+            }
+        );
+        constructor.BindFunc("definitive_mode",
+            [](Rml::Variant& out) { get_option(zelda64::get_definitive_mode(), out); },
+            [](const Rml::Variant& in) {
+                zelda64::DefinitiveMode mode;
+                set_option(mode, in);
+                zelda64::set_definitive_mode(mode);
+            }
+        );
+        constructor.BindFunc("first_person_fog_mode",
+            [](Rml::Variant& out) { get_option(zelda64::get_first_person_fog_mode(), out); },
+            [](const Rml::Variant& in) {
+                zelda64::FirstPersonFogMode mode;
+                set_option(mode, in);
+                zelda64::set_first_person_fog_mode(mode);
             }
         );
         constructor.BindFunc("first_person_strafe_mode",

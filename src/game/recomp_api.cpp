@@ -62,12 +62,49 @@ extern "C" void recomp_get_mouse_camera_mode(uint8_t* rdram, recomp_context* ctx
     _return<s32>(ctx, static_cast<s32>(zelda64::get_mouse_camera_mode()));
 }
 
+extern "C" void recomp_get_first_person_fog(uint8_t* rdram, recomp_context* ctx) {
+    _return<s32>(ctx, static_cast<s32>(zelda64::get_first_person_fog_mode()));
+}
+
+extern "C" void recomp_get_texture_filter(uint8_t* rdram, recomp_context* ctx) {
+    _return<s32>(ctx, static_cast<s32>(zelda64::get_texture_filter_mode()));
+}
+
+extern "C" void recomp_get_definitive(uint8_t* rdram, recomp_context* ctx) {
+    _return<s32>(ctx, zelda64::get_definitive_mode() == zelda64::DefinitiveMode::On ? 1 : 0);
+}
+
 extern "C" void recomp_get_mouse_camera_fov(uint8_t* rdram, recomp_context* ctx) {
     _return<s32>(ctx, zelda64::get_mouse_camera_fov());
 }
 
 extern "C" void recomp_get_mouse_camera_aim(uint8_t* rdram, recomp_context* ctx) {
     _return<s32>(ctx, recomp::get_mouse_camera_aim_held() ? 1 : 0);
+}
+
+extern "C" void recomp_get_camera_distance_presses(uint8_t* rdram, recomp_context* ctx) {
+    _return<s32>(ctx, recomp::consume_camera_distance_presses());
+}
+
+extern "C" void recomp_get_focus_presses(uint8_t* rdram, recomp_context* ctx) {
+    _return<s32>(ctx, recomp::consume_focus_presses());
+}
+
+// Prompt glyph style (0 PlayStation, 1 Xbox, 2 keyboard) in the low byte, the keyboard key bound to C-Down (advance
+// text) in the next byte, and the SDL controller button bound to it (0xFF if none) in the third.
+extern "C" void recomp_get_prompt_style(uint8_t* rdram, recomp_context* ctx) {
+    s32 style = (s32)recomp::get_prompt_style();
+    s32 button = recomp::get_controller_binding_button(recomp::GameInput::C_DOWN);
+    _return<s32>(ctx, style | ((s32)(unsigned char)recomp::get_keyboard_binding_char(recomp::GameInput::C_DOWN) << 8) |
+                          ((button < 0 ? 0xFF : (button & 0xFF)) << 16));
+}
+
+extern "C" void recomp_stop_sprint(uint8_t* rdram, recomp_context* ctx) {
+    recomp::stop_sprint();
+}
+
+extern "C" void recomp_get_sprint_held(uint8_t* rdram, recomp_context* ctx) {
+    _return<s32>(ctx, recomp::get_sprint_held() ? 1 : 0);
 }
 
 extern "C" void recomp_get_mouse_camera_wheel(uint8_t* rdram, recomp_context* ctx) {
