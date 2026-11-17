@@ -53,17 +53,39 @@ options: **Definitive Features** (on / off), **Modern Camera** (off / third / fi
 
 ## Known issues
 
-- Not yet played from a new save to the end: some story scenes, bosses and menus may still misbehave with the new
-  camera or controls. Press F9 with `tools/re/rec.py` running to save a clip of a problem.
-- First person: the view can clip into a wall when standing pressed against it.
-- The sky moves in small steps at high frame rates (it is drawn as 2D rectangles that RT64 doesn't interpolate).
-- Dodge: the first frame of the hop goes to the game's own side, and the animation is always the side hop.
-- Faint light lines can show on the ground in a few places (sub-pixel gaps between terrain pieces).
+Not yet played from a new save to the end, so expect more. Press F9 with `tools/re/rec.py` running to save a clip.
+
+Controls and menus
+- Shops and some other screens still use the gameplay layout: Cross confirms there and R2 goes back.
+- Dialogue: holding a button to fast-forward text (the old Square behavior) is not mapped to Circle yet.
+- The minimap's controls are inverted.
+- Dodge: Mega Man turns slightly to the side before the hop goes where the stick points; the animation is always the
+  side hop.
+- Some enemies can't be locked on.
 - Options menu with the modern camera on: the first Esc frees the mouse and the second opens the menu; the first click
   after opening it is sometimes ignored.
 - The menu button legend shows the default layout, not remapped buttons. With Definitive Features off the buttons
   still reach the game as bound (the defaults are the modern layout's).
 - No aim assist on the third person free aim (only while holding aim).
+
+Camera and view
+- The camera can still pass into level geometry in tight spots.
+- First person: things near the sides of the view disappear (the game's own culling was made for its narrower view),
+  and the view can clip into a wall when standing pressed against it. In town some walls and backgrounds go missing for
+  the same reason.
+- First person: the arm floats in the air while firing.
+- Fog differs between first person (off or subtle) and third person (the game's own) in dungeons.
+
+Graphics
+- Models switch to their lower detail versions close to the camera (visible pop-in); some ground textures sharpen only
+  up close.
+- Automatic dungeon doors briefly show geometry during their transition, in both views.
+- Faint light lines can show on the ground in a few places (sub-pixel gaps between terrain pieces).
+- The sky moves in small steps at high frame rates (it is drawn as 2D rectangles that RT64 doesn't interpolate).
+
+Other
+- The dungeon map only reveals walls Mega Man passes very close to.
+- Occasional short audio stutters.
 
 ## Building
 
